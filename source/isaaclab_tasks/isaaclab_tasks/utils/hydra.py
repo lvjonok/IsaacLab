@@ -61,11 +61,13 @@ def register_task_to_hydra(
     configurables_dict = hydra_groups_cfg.to_dict()
     config_store = ConfigStore.instance()
     default_groups = []
-    for group_name, options_dict in configurables_dict["configurations"].items():
-        default_groups.append(group_name)
-        config_store.store(group=group_name, name="default", node=getattr_nested(cfg_dict, group_name))
-        for option_name, option_val in options_dict.items():
-            config_store.store(group=group_name, name=option_name, node=option_val)
+    for root_config_name, root_config_dict in configurables_dict.items():
+        for group_name, group_option_dict in root_config_dict.items():
+            group_path = f"{root_config_name}.{group_name}"
+            default_groups.append(group_path)
+            config_store.store(group=group_path, name="default", node=getattr_nested(cfg_dict, group_path))
+            for option_name, option_val in group_option_dict.items():
+                config_store.store(group=group_path, name=option_name, node=option_val)
 
     root_defaults = ["_self_"] + [{grp: "default"} for grp in default_groups]
     root_cfg_dict = {"defaults": root_defaults, **cfg_dict}
@@ -103,12 +105,11 @@ def hydra_task_config(task_name: str, agent_cfg_entry_point: str) -> Callable:
                 hydra_env_cfg = replace_strings_with_slices(hydra_env_cfg)
                 # update the group configs with Hydra command line arguments
                 hydra_cfg = HydraConfig.get()
-                for key in configurables.configurations.keys():
-                    cmd_group_choice = hydra_cfg.runtime.choices[key]
-                    if key in hydra_cfg.runtime.choices and cmd_group_choice != 'default':
-                        if "env." in key:
-                            setattr_nested(env_cfg, key.replace('env.', ''), configurables.configurations[key][cmd_group_choice])
-                            setattr_nested(hydra_env_cfg, key, configurables.configurations[key][cmd_group_choice].to_dict())
+                for key in configurables.env.keys():
+                    cmd_group_choice = hydra_cfg.runtime.choices[f"env.{key}"]
+                    if cmd_group_choice != "default":
+                        setattr_nested(env_cfg, key, configurables.env[key][cmd_group_choice])
+                        setattr_nested(hydra_env_cfg["env"], key, configurables.env[key][cmd_group_choice].to_dict())
                 # update the configs with the Hydra command line arguments
                 env_cfg.from_dict(hydra_env_cfg["env"])
                 # replace strings that represent gymnasium spaces because OmegaConf does not support them.
@@ -118,11 +119,10 @@ def hydra_task_config(task_name: str, agent_cfg_entry_point: str) -> Callable:
                 if isinstance(agent_cfg, dict) or agent_cfg is None:
                     agent_cfg = hydra_env_cfg["agent"]
                 else:
-                    for key in configurables.configurations.keys():
-                        cmd_group_choice = hydra_cfg.runtime.choices[key]
-                        if key in hydra_cfg.runtime.choices and cmd_group_choice != 'default':
-                            if "agent." in key:
-                                setattr_nested(agent_cfg, key.replace('agent.', ''), configurables.configurations[key][cmd_group_choice])
+                    for key in configurables.agent.keys():
+                        cmd_group_choice = hydra_cfg.runtime.choices[f"agent.{key}"]
+                        if cmd_group_choice != "default":
+                            setattr_nested(agent_cfg, key, configurables.agent[key][cmd_group_choice])
                     agent_cfg.from_dict(hydra_env_cfg["agent"])
                 # call the original function
                 func(env_cfg, agent_cfg, *args, **kwargs)

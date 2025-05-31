@@ -55,16 +55,14 @@ class StateNoisyObservationsCfg:
     policy: PolicyCfg = PolicyCfg()
 
 
-# action configurations
-
 @configclass
-class HydraConfigurables:
-    configurations: dict[str, any] = {
-        "env.observations": {
+class EnvConfigurables:
+    env: dict[str, any] = {
+        "observations": {
             "state_obs_no_noise": StateNoNoiseObservationsCfg(),
             "state_obs_noisy": StateNoisyObservationsCfg(),
         },
-        "env.actions.arm_action": {
+        "actions.arm_action": {
             "ik_abs_arm_action": mdp.DifferentialInverseKinematicsActionCfg(
                 asset_name="robot",
                 joint_names=["panda_joint.*"],
