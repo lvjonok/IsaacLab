@@ -5,10 +5,13 @@
 
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
+from isaaclab.managers import EventTermCfg as EventTerm
+from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils import configclass
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 
 import isaaclab_tasks.manager_based.manipulation.reach.mdp as mdp
+from ...reach_env_cfg import EventCfg
 
 # Observation configurations
 @configclass
@@ -53,6 +56,38 @@ class StateNoisyObservationsCfg:
 
     # observation groups
     policy: PolicyCfg = PolicyCfg()
+
+@configclass
+class JointRandPositionFrictionEventCfg(EventCfg):
+    
+    reset_robot_joint_friction = EventTerm(
+        func=mdp.randomize_joint_parameters,
+        min_step_count_between_reset=720,
+        mode="reset",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
+            "friction_distribution_params": (0.9, 1.1),
+            "operation": "scale",
+            "distribution": "gaussian",
+        },
+    )
+
+
+@configclass
+class JointRandPositionFrictionAmartureEventCfg(JointRandPositionFrictionEventCfg):
+    """Configuration for events."""
+    
+    reset_robot_joint_amature = EventTerm(
+        func=mdp.randomize_joint_parameters,
+        min_step_count_between_reset=720,
+        mode="reset",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
+            "armature_distribution_params": (0.9, 1.1),
+            "operation": "scale",
+            "distribution": "gaussian",
+        },
+    )
 
 
 @configclass
@@ -101,5 +136,27 @@ class EnvConfigurables:
                 orientation_scale=1.0,
                 stiffness_scale=100.0,
             )
+        },
+        "events": {
+            "rand_joint_pos_friction": JointRandPositionFrictionEventCfg(),
+            "rand_joint_pos_friction_amarture": JointRandPositionFrictionAmartureEventCfg(),
+        },
+        "events.reset_robot_joints": {
+            "aggressive": EventTerm(
+                func=mdp.reset_joints_by_scale,
+                mode="reset",
+                params={
+                    "position_range": (0.0, 2.0),
+                    "velocity_range": (0.0, 1.0),
+                },
+            ),
+            "easy": EventTerm(
+                func=mdp.reset_joints_by_scale,
+                mode="reset",
+                params={
+                    "position_range": (0.0, 0.5),
+                    "velocity_range": (0.0, 0.0),
+                },
+            ),
         }
     }
