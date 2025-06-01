@@ -6,6 +6,7 @@
 """Sub-module with utilities for the hydra configuration system."""
 
 
+import gymnasium as gym
 import functools
 from collections.abc import Callable, Mapping
 
@@ -56,22 +57,29 @@ def register_task_to_hydra(
     cfg_dict = {"env": env_cfg_dict, "agent": agent_cfg_dict}
     # replace slices with strings because OmegaConf does not support slices
     cfg_dict = replace_slices_with_strings(cfg_dict)
-    
-    hydra_groups_cfg = load_cfg_from_registry(task_name, "configurable_entry_point")
-    configurables_dict = hydra_groups_cfg.to_dict()
     config_store = ConfigStore.instance()
-    default_groups = []
-    for root_config_name, root_config_dict in configurables_dict.items():
-        for group_name, group_option_dict in root_config_dict.items():
-            group_path = f"{root_config_name}.{group_name}"
-            default_groups.append(group_path)
-            config_store.store(group=group_path, name="default", node=getattr_nested(cfg_dict, group_path))
-            for option_name, option_val in group_option_dict.items():
-                config_store.store(group=group_path, name=option_name, node=option_val)
 
-    root_defaults = ["_self_"] + [{grp: "default"} for grp in default_groups]
-    root_cfg_dict = {"defaults": root_defaults, **cfg_dict}
-    config_store.store(name=task_name, node=OmegaConf.create(root_cfg_dict), group=None)
+    has_hydra_group_configuration = True if "configurable_entry_point" in gym.spec(task_name).kwargs else False
+    if has_hydra_group_configuration:
+        hydra_groups_cfg = load_cfg_from_registry(task_name, "configurable_entry_point")
+        hydra_groups_cfg = replace_env_cfg_spaces_with_strings(hydra_groups_cfg)
+        configurables_dict = hydra_groups_cfg.to_dict()
+        configurables_dict = replace_slices_with_strings(configurables_dict)
+        default_groups = []
+        for root_config_name, root_config_dict in configurables_dict.items():
+            for group_name, group_option_dict in root_config_dict.items():
+                group_path = f"{root_config_name}.{group_name}"
+                default_groups.append(group_path)
+                config_store.store(group=group_path, name="default", node=getattr_nested(cfg_dict, group_path))
+                for option_name, option_val in group_option_dict.items():
+                    config_store.store(group=group_path, name=option_name, node=option_val)
+
+        root_defaults = ["_self_"] + [{grp: "default"} for grp in default_groups]
+        cfg_dict = {"defaults": root_defaults, **cfg_dict}
+    else:
+        # no predefined-group cfg override, only field overrides
+        hydra_groups_cfg = None
+    config_store.store(name=task_name, node=OmegaConf.create(cfg_dict), group=None)
 
     return env_cfg, agent_cfg, hydra_groups_cfg
 
@@ -104,12 +112,15 @@ def hydra_task_config(task_name: str, agent_cfg_entry_point: str) -> Callable:
                 # replace string with slices because OmegaConf does not support slices
                 hydra_env_cfg = replace_strings_with_slices(hydra_env_cfg)
                 # update the group configs with Hydra command line arguments
-                hydra_cfg = HydraConfig.get()
-                for key in configurables.env.keys():
-                    cmd_group_choice = hydra_cfg.runtime.choices[f"env.{key}"]
-                    if cmd_group_choice != "default":
-                        setattr_nested(env_cfg, key, configurables.env[key][cmd_group_choice])
-                        setattr_nested(hydra_env_cfg["env"], key, configurables.env[key][cmd_group_choice].to_dict())
+                has_hydra_group_configuration = True if "configurable_entry_point" in gym.spec(task_name).kwargs else False
+                if has_hydra_group_configuration:
+                    hydra_cfg = HydraConfig.get()
+                    configurables = replace_strings_with_slices(configurables)
+                    for key in configurables.env.keys():
+                        cmd_group_choice = hydra_cfg.runtime.choices[f"env.{key}"]
+                        if cmd_group_choice != "default":
+                            setattr_nested(env_cfg, key, configurables.env[key][cmd_group_choice])
+                            setattr_nested(hydra_env_cfg["env"], key, configurables.env[key][cmd_group_choice].to_dict())
                 # update the configs with the Hydra command line arguments
                 env_cfg.from_dict(hydra_env_cfg["env"])
                 # replace strings that represent gymnasium spaces because OmegaConf does not support them.
@@ -119,10 +130,11 @@ def hydra_task_config(task_name: str, agent_cfg_entry_point: str) -> Callable:
                 if isinstance(agent_cfg, dict) or agent_cfg is None:
                     agent_cfg = hydra_env_cfg["agent"]
                 else:
-                    for key in configurables.agent.keys():
-                        cmd_group_choice = hydra_cfg.runtime.choices[f"agent.{key}"]
-                        if cmd_group_choice != "default":
-                            setattr_nested(agent_cfg, key, configurables.agent[key][cmd_group_choice])
+                    if has_hydra_group_configuration:
+                        for key in configurables.agent.keys():
+                            cmd_group_choice = hydra_cfg.runtime.choices[f"agent.{key}"]
+                            if cmd_group_choice != "default":
+                                setattr_nested(agent_cfg, key, configurables.agent[key][cmd_group_choice])
                     agent_cfg.from_dict(hydra_env_cfg["agent"])
                 # call the original function
                 func(env_cfg, agent_cfg, *args, **kwargs)
